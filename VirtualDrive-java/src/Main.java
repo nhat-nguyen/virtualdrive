@@ -2,12 +2,37 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.SimpleFileVisitor;
+import java.nio.file.attribute.BasicFileAttributes;
 
 public class Main {
 
     private static final Path VIRTUAL_DRIVE = Path.of("T:");
+    private static Path TEST_TEMP_FOLDER;
+
+    static Path createTempDirectory() throws IOException {
+        return Files.createTempDirectory(TEST_TEMP_FOLDER, "test");
+    }
+
+    static void deleteTestFolder() throws IOException {
+        Path directory = TEST_TEMP_FOLDER;
+        Files.walkFileTree(directory, new SimpleFileVisitor<Path>() {
+            @Override
+            public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+                Files.delete(file);
+                return FileVisitResult.CONTINUE;
+            }
+
+            @Override
+            public FileVisitResult postVisitDirectory(Path dir, IOException exc) throws IOException {
+                Files.delete(dir);
+                return FileVisitResult.CONTINUE;
+            }
+        });
+    }
 
     static String readFromStream(InputStream stream) throws IOException {
         BufferedReader output = new BufferedReader(new
@@ -46,7 +71,7 @@ public class Main {
 
 
     static void testCreateAndDeleteFile() throws IOException {
-        Path tempDirectory = Files.createTempDirectory("test");
+        Path tempDirectory = createTempDirectory();
         subst(VIRTUAL_DRIVE, tempDirectory);
 
 
@@ -60,13 +85,11 @@ public class Main {
         assert Files.readString(p).equals(fileContents);
 
 
-        Files.delete(p);
-        Files.delete(tempDirectory);
         substDelete(VIRTUAL_DRIVE);
     }
 
     static void testDeleteSubstitutedDrive() throws IOException {
-        Path tempDirectory = Files.createTempDirectory("test");
+        Path tempDirectory = createTempDirectory();
         subst(VIRTUAL_DRIVE, tempDirectory);
 
 
@@ -80,7 +103,7 @@ public class Main {
 
 
     static void testIsWritable() throws IOException {
-        Path tempDirectory = Files.createTempDirectory("test");
+        Path tempDirectory = createTempDirectory();
         Path virtualDrive = VIRTUAL_DRIVE;
         subst(VIRTUAL_DRIVE, tempDirectory);
 
@@ -95,13 +118,13 @@ public class Main {
         assert Files.getOwner(tempDirectory).equals(Files.getOwner(virtualDrive));
         assert Files.isWritable(tempDirectory) == Files.isWritable(virtualDrive);
 
-        Files.delete(tempDirectory);
+
         substDelete(VIRTUAL_DRIVE);
     }
 
 
     static void testGetSetAttributes() throws IOException {
-        Path tempDirectory = Files.createTempDirectory("test");
+        Path tempDirectory = createTempDirectory();
         subst(VIRTUAL_DRIVE, tempDirectory);
 
         Files.setAttribute(VIRTUAL_DRIVE, "dos:hidden", true);
@@ -116,12 +139,12 @@ public class Main {
         var attr2 = Files.readAttributes(tempDirectory, "*");
         assert attr1.equals(attr2);
 
-        Files.delete(tempDirectory);
+
         substDelete(VIRTUAL_DRIVE);
     }
 
     static void testFileStore() throws IOException {
-        Path tempDirectory = Files.createTempDirectory("test");
+        Path tempDirectory = createTempDirectory();
         subst(VIRTUAL_DRIVE, tempDirectory);
 
 
@@ -138,13 +161,12 @@ public class Main {
         assert VIRTUAL_DRIVE.getFileSystem().getRootDirectories().equals(tempDirectory.getFileSystem().getRootDirectories());
 
 
-        Files.delete(tempDirectory);
         substDelete(VIRTUAL_DRIVE);
     }
 
     static void testSymlinkFile() throws IOException {
         String contents = "Hello world!";
-        Path tempDirectory = Files.createTempDirectory("test");
+        Path tempDirectory = createTempDirectory();
         subst(VIRTUAL_DRIVE, tempDirectory);
         Path tempFile = Path.of(VIRTUAL_DRIVE.toString(), "test.txt");
 
@@ -164,14 +186,12 @@ public class Main {
         assert Files.isWritable(link) == Files.isWritable(tempFile);
         assert Files.getOwner(link).equals(Files.getOwner(tempFile));
 
-        Files.delete(link);
-        Files.delete(tempFile);
-        Files.delete(tempDirectory);
+
         substDelete(VIRTUAL_DRIVE);
     }
 
     static void testSubstAndSymlink() throws IOException {
-        Path tempDirectory = Files.createTempDirectory("test");
+        Path tempDirectory = createTempDirectory();
         Path tempLink = Path.of(tempDirectory.toString() + "_link");
         Files.createSymbolicLink(tempLink, tempDirectory);
 
@@ -185,7 +205,7 @@ public class Main {
         Files.writeString(tempFile, contents);
         assert Files.readString(tempFile).equals(contents);
 
-        Path tempDirectory2 = Files.createTempDirectory("test");
+        Path tempDirectory2 = createTempDirectory();
         Path copy = Path.of(tempDirectory2.toString(), "copied");
         Files.copy(tempFile, copy);
 
@@ -198,18 +218,14 @@ public class Main {
         assert Files.exists(cut);
         assert Files.readString(cut).equals(contents);
 
-        Files.delete(copy);
-        Files.delete(cut);
-        Files.delete(tempDirectory2);
-        Files.delete(tempLink);
-        Files.delete(tempDirectory);
+
         substDelete(VIRTUAL_DRIVE);
     }
 
 
     // Subst on a symlinked folder
     static void testMoveAndCopyFiles() throws IOException {
-        Path tempDirectory = Files.createTempDirectory("test");
+        Path tempDirectory = createTempDirectory();
         Path tempLink = Path.of(tempDirectory.toString() + "_link");
         Files.createSymbolicLink(tempLink, tempDirectory);
 
@@ -218,14 +234,13 @@ public class Main {
         assert Files.readAttributes(VIRTUAL_DRIVE, "*").equals(Files.readAttributes(tempDirectory, "*"));
         assert Files.isWritable(VIRTUAL_DRIVE);
 
-        Files.delete(tempLink);
-        Files.delete(tempDirectory);
+
         substDelete(VIRTUAL_DRIVE);
     }
 
 
     static void testMoveAndCopySubstDrive() throws IOException {
-        Path tempDirectory = Files.createTempDirectory("test");
+        Path tempDirectory = createTempDirectory();
         Path tempDirectoryCopy = Path.of(tempDirectory.toString() + "_copy");
 
         subst(VIRTUAL_DRIVE, tempDirectory);
@@ -240,11 +255,15 @@ public class Main {
         assert Files.isWritable(VIRTUAL_DRIVE) == Files.isWritable(tempDirectoryCopy);
         assert Files.getOwner(VIRTUAL_DRIVE).equals(Files.getOwner(tempDirectoryCopy));
 
-        Files.delete(tempDirectory);
+
         substDelete(VIRTUAL_DRIVE);
     }
 
     public static void main(String[] args) throws IOException {
+
+        TEST_TEMP_FOLDER = Files.createTempDirectory("virtual-drive-test");
+        System.out.printf("Test folder is at %s\n", TEST_TEMP_FOLDER);
+
         try {
             testCreateAndDeleteFile();
             testDeleteSubstitutedDrive();
@@ -257,8 +276,10 @@ public class Main {
             testMoveAndCopySubstDrive();
             System.out.println("Tests succeeded");
         } catch (Throwable e) {
+            e.printStackTrace();
+        } finally {
             substDelete(VIRTUAL_DRIVE);
-            throw new RuntimeException(e);
+            deleteTestFolder();
         }
     }
 }
