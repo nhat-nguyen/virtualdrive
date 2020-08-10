@@ -2,10 +2,7 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
-import java.nio.file.FileVisitResult;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.SimpleFileVisitor;
+import java.nio.file.*;
 import java.nio.file.attribute.BasicFileAttributes;
 
 public class Main {
@@ -35,8 +32,7 @@ public class Main {
     }
 
     static String readFromStream(InputStream stream) throws IOException {
-        BufferedReader output = new BufferedReader(new
-                InputStreamReader(stream));
+        BufferedReader output = new BufferedReader(new InputStreamReader(stream));
         StringBuilder builder = new StringBuilder();
         String s;
         while ((s = output.readLine()) != null) {
@@ -45,7 +41,7 @@ public class Main {
         return builder.toString();
     }
 
-    static void runCmd(String cmd, boolean throwWhenUnsuccessful) throws IOException {
+    static void runCmd(String cmd, boolean throwWhenUnsuccesful) throws IOException {
         Process process = Runtime.getRuntime().exec(cmd);
         boolean successful;
 
@@ -55,7 +51,7 @@ public class Main {
             successful = false;
         }
 
-        if (!successful && throwWhenUnsuccessful) {
+        if (!successful && throwWhenUnsuccesful) {
             String output = readFromStream(process.getInputStream()) + readFromStream(process.getErrorStream());
             throw new RuntimeException(String.format("Command failed to run, output:\n %s", output));
         }
@@ -66,9 +62,12 @@ public class Main {
     }
 
     static void substDelete(Path drive) throws IOException {
-        runCmd(String.format("cmd /c subst %s /d", drive.toString()), false);
+        runCmd(String.format("cmd /c subst %s /d", drive.toString()), true);
     }
 
+    static void substDeleteIgnoreError(Path drive) throws IOException {
+        runCmd(String.format("cmd /c subst %s /d", drive.toString()), false);
+    }
 
     static void testCreateAndDeleteFile() throws IOException {
         Path tempDirectory = createTempDirectory();
@@ -164,7 +163,27 @@ public class Main {
         substDelete(VIRTUAL_DRIVE);
     }
 
-    static void testSymlinkFile() throws IOException {
+    static void testMoveAndCopySubstDrive() throws IOException {
+        Path tempDirectory = createTempDirectory();
+        Path tempDirectoryCopy = Path.of(tempDirectory.toString() + "_copy");
+
+        subst(VIRTUAL_DRIVE, tempDirectory);
+
+        Files.copy(VIRTUAL_DRIVE, tempDirectoryCopy);
+
+        assert Files.isExecutable(VIRTUAL_DRIVE) == Files.isExecutable(tempDirectoryCopy);
+        assert Files.isReadable(VIRTUAL_DRIVE) == Files.isReadable(tempDirectoryCopy);
+        assert Files.isDirectory(VIRTUAL_DRIVE) == Files.isDirectory(tempDirectoryCopy);
+        assert Files.isHidden(VIRTUAL_DRIVE) == Files.isHidden(tempDirectoryCopy);
+        assert Files.isRegularFile(VIRTUAL_DRIVE) == Files.isRegularFile(tempDirectoryCopy);
+        assert Files.isWritable(VIRTUAL_DRIVE) == Files.isWritable(tempDirectoryCopy);
+        assert Files.getOwner(VIRTUAL_DRIVE).equals(Files.getOwner(tempDirectoryCopy));
+
+
+        substDelete(VIRTUAL_DRIVE);
+    }
+
+    static void testGetSymlinkAttribute() throws IOException {
         String contents = "Hello world!";
         Path tempDirectory = createTempDirectory();
         subst(VIRTUAL_DRIVE, tempDirectory);
@@ -190,7 +209,7 @@ public class Main {
         substDelete(VIRTUAL_DRIVE);
     }
 
-    static void testSubstAndSymlink() throws IOException {
+    static void testSubstWithSymlinkFolder() throws IOException {
         Path tempDirectory = createTempDirectory();
         Path tempLink = Path.of(tempDirectory.toString() + "_link");
         Files.createSymbolicLink(tempLink, tempDirectory);
@@ -223,8 +242,7 @@ public class Main {
     }
 
 
-    // Subst on a symlinked folder
-    static void testMoveAndCopyFiles() throws IOException {
+    static void testMoveAndCopyFilesToSymlinkedDrive() throws IOException {
         Path tempDirectory = createTempDirectory();
         Path tempLink = Path.of(tempDirectory.toString() + "_link");
         Files.createSymbolicLink(tempLink, tempDirectory);
@@ -239,27 +257,10 @@ public class Main {
     }
 
 
-    static void testMoveAndCopySubstDrive() throws IOException {
-        Path tempDirectory = createTempDirectory();
-        Path tempDirectoryCopy = Path.of(tempDirectory.toString() + "_copy");
-
-        subst(VIRTUAL_DRIVE, tempDirectory);
-
-        Files.copy(VIRTUAL_DRIVE, tempDirectoryCopy);
-
-        assert Files.isExecutable(VIRTUAL_DRIVE) == Files.isExecutable(tempDirectoryCopy);
-        assert Files.isReadable(VIRTUAL_DRIVE) == Files.isReadable(tempDirectoryCopy);
-        assert Files.isDirectory(VIRTUAL_DRIVE) == Files.isDirectory(tempDirectoryCopy);
-        assert Files.isHidden(VIRTUAL_DRIVE) == Files.isHidden(tempDirectoryCopy);
-        assert Files.isRegularFile(VIRTUAL_DRIVE) == Files.isRegularFile(tempDirectoryCopy);
-        assert Files.isWritable(VIRTUAL_DRIVE) == Files.isWritable(tempDirectoryCopy);
-        assert Files.getOwner(VIRTUAL_DRIVE).equals(Files.getOwner(tempDirectoryCopy));
-
-
-        substDelete(VIRTUAL_DRIVE);
-    }
-
     public static void main(String[] args) throws IOException {
+        if (!System.getProperty("os.name").startsWith("Windows")) {
+            return;
+        }
 
         TEST_TEMP_FOLDER = Files.createTempDirectory("virtual-drive-test");
         System.out.printf("Test folder is at %s\n", TEST_TEMP_FOLDER);
@@ -270,16 +271,22 @@ public class Main {
             testIsWritable();
             testFileStore();
             testGetSetAttributes();
-            testSymlinkFile();
-            testSubstAndSymlink();
-            testMoveAndCopyFiles();
             testMoveAndCopySubstDrive();
-            System.out.println("Tests succeeded");
+
+            // Run tests with symlink last since they require administrator privilege
+            // and therefore are likely to fail
+            testSubstWithSymlinkFolder();
+            testGetSymlinkAttribute();
+            testMoveAndCopyFilesToSymlinkedDrive();
         } catch (Throwable e) {
-            e.printStackTrace();
-        } finally {
-            substDelete(VIRTUAL_DRIVE);
+            substDeleteIgnoreError(VIRTUAL_DRIVE);
             deleteTestFolder();
+
+            if (e.getMessage().contains("A required privilege is not held by the client")) {
+                System.out.println("Skipping tests requiring symlinks since they require running as administrator");
+            } else {
+                throw new RuntimeException(e);
+            }
         }
     }
 }
